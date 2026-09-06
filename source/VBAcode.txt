@@ -1,0 +1,2256 @@
+ =====メニュー画面 =====
+
+Option Compare Database
+Private Sub インポート_Click()
+
+    On Error GoTo ErrorHandler
+
+    Dim fd As Office.FileDialog
+    Dim filePath As String
+
+    '==========================
+    'ファイル選択
+    '==========================
+    Set fd = Application.FileDialog(msoFileDialogFilePicker)
+
+    With fd
+
+        .Title = "CSV・Excelファイルを選択してください"
+        .AllowMultiSelect = False
+
+        .Filters.Clear
+        .Filters.Add "CSV・Excel", "*.csv;*.xlsx;*.xls"
+
+        If .Show = False Then
+            Exit Sub
+        End If
+
+        filePath = .SelectedItems(1)
+
+    End With
+
+    '==========================
+    '一時テーブル初期化
+    '==========================
+    CurrentDb.Execute _
+        "DELETE FROM [一時テーブル]", _
+        dbFailOnError
+
+    '==========================
+    'CSV取込
+    '==========================
+    If LCase$(Right$(filePath, 4)) = ".csv" Then
+
+        DoCmd.TransferText _
+            acImportDelim, _
+            , _
+            "一時テーブル", _
+            filePath, _
+            True
+
+    Else
+
+        '==========================
+        'Excel取込
+        '==========================
+        DoCmd.TransferSpreadsheet _
+            acImport, _
+            acSpreadsheetTypeExcel12Xml, _
+            "一時テーブル", _
+            filePath, _
+            True
+
+    End If
+
+    '==========================
+    '1件目の処理開始
+    '==========================
+    ImportNextRecord
+
+    Exit Sub
+
+ErrorHandler:
+
+    MsgBox _
+        "インポート中にエラーが発生しました。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical
+
+End Sub
+
+Private Sub 検索_Click()
+
+ DoCmd.OpenForm "検索"
+
+End Sub
+
+Private Sub 登録_Click()
+
+
+    DoCmd.OpenForm "登録"
+
+End Sub
+
+Private Sub 編集削除_Click()
+
+    ' 変更理由：固定パスワードの直書きを廃止し、ポートフォリオ版では認証を対象外とする。
+
+    DoCmd.OpenForm "編集・削除"
+
+End Sub
+
+=====検索 =====
+
+Option Compare Database
+
+
+Private Sub クリア_Click()
+
+    Me.txt氏名 = Null
+    Me.txt組織名 = Null
+    Me.txtメール = Null
+    Me.txt電話番号 = Null
+    Me.cmb担当支援員 = Null
+    Me.cmb並び順 = Null
+    Me.cmb表示順 = Null
+
+    Me.FilterOn = False
+    Me.OrderByOn = False
+
+    Me.Requery
+
+End Sub
+
+Private Sub コマンド66_Click()
+    Dim strFilter As String
+    Dim strSort As String
+
+    '==========================
+    ' 氏名
+    '==========================
+    If Nz(Me.txt氏名, "") <> "" Then
+        strFilter = strFilter & _
+        "[氏名] Like '*" & Replace(Me.txt氏名, "'", "''") & "*' AND "
+    End If
+
+    '==========================
+    ' 組織名
+    '==========================
+    If Nz(Me.txt組織名, "") <> "" Then
+        strFilter = strFilter & _
+        "[組織名] Like '*" & Replace(Me.txt組織名, "'", "''") & "*' AND "
+    End If
+
+    '==========================
+    ' メール・メール2
+    '==========================
+    If Nz(Me.txtメール, "") <> "" Then
+
+        strFilter = strFilter & _
+        "([メール] Like '*" & Replace(Me.txtメール, "'", "''") & _
+        "*' OR [メール2] Like '*" & Replace(Me.txtメール, "'", "''") & "*') AND "
+
+    End If
+
+    '==========================
+    ' 電話・携帯
+    '==========================
+    If Nz(Me.txt電話番号, "") <> "" Then
+
+        strFilter = strFilter & _
+        "([電話] Like '*" & Replace(Me.txt電話番号, "'", "''") & _
+        "*' OR [携帯電話] Like '*" & Replace(Me.txt電話番号, "'", "''") & "*') AND "
+
+    End If
+
+    '==========================
+    ' 担当支援員
+    '==========================
+    If Nz(Me.cmb担当支援員, "") <> "" Then
+
+        strFilter = strFilter & _
+        "[担当支援員]='" & Replace(Me.cmb担当支援員, "'", "''") & "' AND "
+
+    End If
+
+    If strFilter <> "" Then
+        strFilter = Left(strFilter, Len(strFilter) - 5)
+        Me.Filter = strFilter
+        Me.FilterOn = True
+    Else
+        Me.FilterOn = False
+    End If
+
+    '==========================
+    ' 並び順
+    '==========================
+    
+
+    Select Case Nz(Me.cmb並び順, "")
+
+        Case "氏名"
+            strSort = "[氏名]"
+
+        Case "組織名"
+            strSort = "[組織名]"
+
+        Case "登録日"
+            strSort = "[登録日]"
+
+        Case "担当支援員"
+            strSort = "[担当支援員]"
+            
+            
+       
+
+    End Select
+
+    If strSort <> "" Then
+
+        If Nz(Me.cmb表示順, "昇順") = "降順" Then
+            strSort = strSort & " DESC"
+        Else
+            strSort = strSort & " ASC"
+        End If
+
+        Me.OrderBy = strSort
+        Me.OrderByOn = True
+        
+        
+
+    Else
+    
+
+        Me.OrderByOn = False
+
+    End If
+    
+    
+    
+
+End Sub
+
+Private Sub Form_Load()
+
+    LoadSupportStaffList
+
+End Sub
+
+
+
+Private Sub LoadSupportStaffList()
+
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+
+    Dim dict As Object
+
+    Dim arr() As String
+    Dim i As Long
+    Dim value As Variant
+
+    Set db = CurrentDb
+
+    Set rs = db.OpenRecordset( _
+        "SELECT [担当支援員] FROM ダミーデータ " & _
+        "WHERE [担当支援員] Is Not Null " & _
+        "AND [担当支援員]<>''", _
+        dbOpenSnapshot)
+
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    Do While Not rs.EOF
+
+        arr = Split(rs!担当支援員, ",")
+
+        For i = LBound(arr) To UBound(arr)
+
+            value = Trim(arr(i))
+
+            If value <> "" Then
+
+                If Not dict.Exists(value) Then
+                    dict.Add value, value
+                End If
+
+            End If
+
+        Next
+
+        rs.MoveNext
+
+    Loop
+
+    rs.Close
+
+    Me.cmb担当支援員.RowSourceType = "値リスト"
+    Me.cmb担当支援員.RowSource = ""
+
+    Me.cmb担当支援員.AddItem ""
+
+    For Each value In dict.Keys
+        Me.cmb担当支援員.AddItem value
+    Next
+
+End Sub
+
+Private Sub 戻る_Click()
+
+    DoCmd.Close acForm, Me.Name
+    DoCmd.OpenForm "メニュー画面"
+
+End Sub
+
+=====重複候補フォーム=====
+
+Option Compare Database
+
+
+
+
+Private Sub クリア_Click()
+
+
+    Me.txt氏名 = Null
+    Me.txt組織名 = Null
+    Me.txt部署名 = Null
+    Me.txt役職 = Null
+    Me.txtメール = Null
+    Me.txt担当支援員 = Null
+
+    Me.Requery
+
+
+End Sub
+
+Private Sub コマンド66_Click()
+    Dim strFilter As String
+
+    If Nz(Me.txt組織名, "") <> "" Then
+        strFilter = strFilter & "[組織名] Like '*" & Replace(Me.txt組織名, "'", "''") & "*' AND "
+    End If
+
+    If Nz(Me.txt部署名, "") <> "" Then
+        strFilter = strFilter & "[部署名] Like '*" & Replace(Me.txt部署名, "'", "''") & "*' AND "
+    End If
+
+    If Nz(Me.txt役職, "") <> "" Then
+        strFilter = strFilter & "[役職] Like '*" & Replace(Me.txt役職, "'", "''") & "*' AND "
+    End If
+
+    If Nz(Me.txt氏名, "") <> "" Then
+        strFilter = strFilter & "[氏名] Like '*" & Replace(Me.txt氏名, "'", "''") & "*' AND "
+    End If
+
+
+    If Nz(Me.txt担当支援員, "") <> "" Then
+        strFilter = strFilter & "[担当支援員] Like '*" & Replace(Me.txt担当支援員, "'", "''") & "*' AND "
+    End If
+
+    If strFilter <> "" Then
+        strFilter = Left(strFilter, Len(strFilter) - 5)
+        Me.Filter = strFilter
+        Me.FilterOn = True
+    Else
+        Me.FilterOn = False
+    End If
+
+End Sub
+
+
+
+Private Sub Form_Load()
+
+    Me.txt組織名 = Nz(TempVars("NewOrganization"), "")
+    Me.txt氏名 = Nz(TempVars("NewPersonName"), "")
+    Me.txt担当支援員 = Nz(TempVars("NewSupportStaff"), "")
+
+End Sub
+
+Private Sub キャンセル_Click()
+
+    On Error GoTo ErrorHandler
+
+    Dim importID As Variant
+    Dim isImportMode As Boolean
+
+    importID = Null
+    isImportMode = False
+
+    ' 変更理由：ImportRecordIDが存在する場合だけインポート中として扱います。
+    On Error Resume Next
+    importID = TempVars("ImportRecordID").value
+
+    If Err.Number = 0 Then
+        If Not IsNull(importID) Then
+            isImportMode = (CLng(importID) > 0)
+        End If
+    Else
+        Err.Clear
+    End If
+    On Error GoTo ErrorHandler
+
+    ' インポート中なら、キャンセル対象の一時データを削除
+    If isImportMode Then
+        CurrentDb.Execute _
+            "DELETE FROM [一時テーブル] " & _
+            "WHERE [ID]=" & CLng(importID), _
+            dbFailOnError
+    End If
+
+    ' 重複候補を削除
+    CurrentDb.Execute _
+        "DELETE FROM [重複候補]", _
+        dbFailOnError
+
+    ' TempVarsを削除
+    On Error Resume Next
+    TempVars.Remove "ImportRecordID"
+    TempVars.Remove "NewOrganization"
+    TempVars.Remove "NewPersonName"
+    TempVars.Remove "NewSupportStaff"
+    Err.Clear
+    On Error GoTo ErrorHandler
+
+    ' 重複候補フォームを閉じる
+    DoCmd.Close acForm, Me.Name
+    DoEvents
+
+    ' 変更理由：インポート中のキャンセル時だけ次のレコードを処理します。
+    If isImportMode Then
+        ImportNextRecord
+    End If
+
+    Exit Sub
+
+ErrorHandler:
+
+    MsgBox _
+        "キャンセル処理中にエラーが発生しました。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical, _
+        "キャンセルエラー"
+
+End Sub
+
+Private Sub 新規登録_Click()
+
+    On Error GoTo ErrorHandler
+
+    Dim importID As Long
+    Dim isImport As Boolean
+
+    '==========================
+    ' インポート中か判定
+    '==========================
+    On Error Resume Next
+
+    importID = CLng(TempVars("ImportRecordID").value)
+
+    If Err.Number = 0 Then
+        isImport = True
+    Else
+        isImport = False
+        Err.Clear
+    End If
+
+    On Error GoTo ErrorHandler
+
+    '==========================
+    ' 新規レコード登録
+    '==========================
+    RegisterRecord _
+        TempVars("NewRegisterDate").value, _
+        CStr(Nz(TempVars("NewOrganization").value, vbNullString)), _
+        CStr(Nz(TempVars("NewDepartment").value, vbNullString)), _
+        CStr(Nz(TempVars("NewPosition").value, vbNullString)), _
+        CStr(Nz(TempVars("NewQualification").value, vbNullString)), _
+        CStr(Nz(TempVars("NewPersonName").value, vbNullString)), _
+        CStr(Nz(TempVars("NewMail").value, vbNullString)), _
+        CStr(Nz(TempVars("NewMail2").value, vbNullString)), _
+        CStr(Nz(TempVars("NewPhone").value, vbNullString)), _
+        CStr(Nz(TempVars("NewMobile").value, vbNullString)), _
+        CStr(Nz(TempVars("NewSupportStaff").value, vbNullString)), _
+        CStr(Nz(TempVars("NewMemo").value, vbNullString)), _
+        CStr(Nz(TempVars("NewInputUser").value, vbNullString)), _
+        CStr(Nz(TempVars("NewChecker").value, vbNullString)), _
+        TempVars("NewCheckDate").value
+
+    '==========================
+    ' インポート中の処理
+    '==========================
+    If isImport Then
+
+        CurrentDb.Execute _
+            "DELETE FROM [一時テーブル] " & _
+            "WHERE [ID]=" & importID, _
+            dbFailOnError
+
+        MsgBox _
+            "登録しました。" & vbCrLf & _
+            "次の1件を処理します。", _
+            vbInformation
+
+        'インポート対象IDを削除
+        On Error Resume Next
+        TempVars.Remove "ImportRecordID"
+        On Error GoTo ErrorHandler
+
+        '共通の一時変数を削除
+        ClearNewRecordTempVars
+
+        '重複候補フォームを閉じる
+        DoCmd.Close acForm, Me.Name
+
+        '次のインポートデータへ進む
+        ImportNextRecord
+
+    Else
+
+        '==========================
+        ' 通常登録の処理
+        '==========================
+        MsgBox "登録しました。", vbInformation
+
+        ClearNewRecordTempVars
+
+        DoCmd.Close acForm, Me.Name
+
+    End If
+
+    Exit Sub
+
+ErrorHandler:
+
+    MsgBox _
+        "新規登録処理中にエラーが発生しました。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical, _
+        "新規登録エラー"
+
+End Sub
+
+Private Sub 統合_Click()
+
+    On Error GoTo ErrorHandler
+
+    Dim targetID As Long
+    Dim supportStaff As String
+    Dim importID As Variant
+    Dim isImportMode As Boolean
+
+    importID = Null
+    isImportMode = False
+
+    ' ImportRecordIDが存在する場合のみインポートモード
+    On Error Resume Next
+    importID = TempVars("ImportRecordID").value
+
+    If Err.Number = 0 Then
+        If Not IsNull(importID) Then
+            isImportMode = (CLng(importID) > 0)
+        End If
+    Else
+        Err.Clear
+    End If
+    On Error GoTo ErrorHandler
+
+    ' チェック状態を保存
+    If Me.Dirty Then
+        Me.Dirty = False
+    End If
+
+    ' チェックされた件数確認
+    If DCount("*", "重複候補", "[選択]=True") <> 1 Then
+        MsgBox "統合する候補を1件選択してください。", vbExclamation
+        Exit Sub
+    End If
+
+    ' 対象ID取得
+    targetID = Nz(DLookup( _
+                    "対象ID", _
+                    "重複候補", _
+                    "[選択]=True"), 0)
+
+    If targetID = 0 Then
+        MsgBox "対象IDを取得できません。", vbCritical
+        Exit Sub
+    End If
+
+    ' 担当支援員取得
+    supportStaff = Nz(TempVars("NewSupportStaff"), "")
+
+    ' 担当支援員を統合
+    If Not MergeSupportStaff(targetID, supportStaff) Then
+        Exit Sub
+    End If
+
+    ' インポート時だけ一時テーブルから削除
+    If isImportMode Then
+        CurrentDb.Execute _
+            "DELETE FROM [一時テーブル] " & _
+            "WHERE [ID]=" & CLng(importID), _
+            dbFailOnError
+    End If
+
+    ' 重複候補テーブル初期化
+    CurrentDb.Execute _
+        "DELETE FROM [重複候補]", _
+        dbFailOnError
+
+    ' TempVars削除
+    On Error Resume Next
+    TempVars.Remove "ImportRecordID"
+    TempVars.Remove "NewOrganization"
+    TempVars.Remove "NewPersonName"
+    TempVars.Remove "NewSupportStaff"
+    On Error GoTo ErrorHandler
+
+    MsgBox "担当支援員を統合しました。", vbInformation
+
+    DoCmd.Close acForm, Me.Name
+
+    ' インポート時だけ次のレコードを処理
+    If isImportMode Then
+        ImportNextRecord
+    End If
+
+    Exit Sub
+
+ErrorHandler:
+
+    MsgBox Err.Number & vbCrLf & Err.Description, vbCritical
+
+End Sub
+
+ ===== 登録 =====
+Option Compare Database
+
+Option Explicit
+
+Private Sub 保存_Click()
+
+    'On Error GoTo ErrorHandler
+    
+    Dim s As String
+
+  
+    
+    If IsExactDuplicate( _
+        Me!組織名, _
+        Me!氏名, _
+        Me!担当支援員) Then
+    
+        MsgBox "完全に同じデータが既に登録されています。", vbInformation
+        Exit Sub
+    
+    End If
+
+    Dim duplicateCount As Long
+
+    '==========================
+    ' 入力チェック
+    '==========================
+    
+    
+    If Trim$(Nz(Me!組織名, vbNullString)) = vbNullString Then
+        MsgBox "組織名を入力してください。", vbExclamation
+        Me!組織名.SetFocus
+        Exit Sub
+    End If
+
+    If Trim$(Nz(Me!氏名, vbNullString)) = vbNullString Then
+        MsgBox "氏名を入力してください。", vbExclamation
+        Me!氏名.SetFocus
+        Exit Sub
+    End If
+    
+    s = Nz(Me!氏名, "")
+    ' 全角スペースを半角へ変換
+    s = Replace(s, "　", " ")
+    ' 前後の空白を除去
+    s = Trim$(s)
+    Me!氏名 = s
+    
+    If s <> Trim$(s) Then
+        MsgBox "氏名の先頭・末尾にスペースがあります。"
+        Exit Sub
+    End If
+    
+    
+    If InStr(s, "  ") > 0 Then
+        MsgBox "半角スペースは1つだけ入力してください。"
+        Exit Sub
+    End If
+    
+    If InStr(s, " ") = 0 Then
+        MsgBox "姓と名の間を半角スペース1つで入力してください。"
+        Exit Sub
+    End If
+    
+
+    '==========================
+    ' 重複候補テーブル初期化
+    '==========================
+    CurrentDb.Execute _
+        "DELETE FROM [重複候補]", _
+        dbFailOnError
+
+    '==========================
+    ' 候補作成
+    '==========================
+    duplicateCount = RebuildDuplicateCandidates( _
+                        Me!組織名, _
+                        Me!氏名 _
+                     )
+
+    If duplicateCount = -1 Then
+        Exit Sub
+    End If
+
+    '==========================
+    ' 候補あり
+    '==========================
+    If duplicateCount > 0 Then
+
+        TempVars("NewRegisterDate") = Nz(Me!登録日.value, Null)
+        TempVars("NewOrganization") = Nz(Me!組織名, "")
+        TempVars("NewDepartment") = Nz(Me!部署名, "")
+        TempVars("NewPosition") = Nz(Me!役職, "")
+        TempVars("NewQualification") = Nz(Me!資格, "")
+        TempVars("NewPersonName") = Nz(Me!氏名, "")
+        TempVars("NewMail") = Nz(Me!メール, "")
+        TempVars("NewMail2") = Nz(Me!メール2, "")
+        TempVars("NewPhone") = Nz(Me!電話, "")
+        TempVars("NewMobile") = Nz(Me!携帯電話, "")
+        TempVars("NewSupportStaff") = Nz(Me!担当支援員, "")
+        TempVars("NewMemo") = Nz(Me!備考, "")
+        TempVars("NewInputUser") = Nz(Me!入力者, "")
+        TempVars("NewChecker") = Nz(Me!確認者, "")
+        TempVars("NewCheckDate") = Nz(Me!確認日.value, "")
+
+        ' 変更理由：重複候補がある場合、新規レコードをダミーデータへ保存しません。
+        If Me.Dirty Then
+            Me.Undo
+        End If
+
+        DoCmd.OpenForm "重複候補フォーム"
+
+        Exit Sub
+
+    End If
+
+        '==========================
+        ' 候補なし
+        '==========================
+        
+        Dim registerDateValue As Variant
+        Dim organizationValue As String
+        Dim departmentValue As String
+        Dim positionValue As String
+        Dim qualificationValue As String
+        Dim personNameValue As String
+        Dim mailValue As String
+        Dim mail2Value As String
+        Dim phoneValue As String
+        Dim mobileValue As String
+        Dim supportStaffValue As String
+        Dim memoValue As String
+        Dim inputUserValue As String
+        Dim checkerValue As String
+        Dim checkDateValue As Variant
+        
+        ' 入力内容を一時的に変数へ退避
+        registerDateValue = Me!登録日
+        organizationValue = Nz(Me!組織名, vbNullString)
+        departmentValue = Nz(Me!部署名, vbNullString)
+        positionValue = Nz(Me!役職, vbNullString)
+        qualificationValue = Nz(Me!資格, vbNullString)
+        personNameValue = Nz(Me!氏名, vbNullString)
+        mailValue = Nz(Me!メール, vbNullString)
+        mail2Value = Nz(Me!メール2, vbNullString)
+        phoneValue = Nz(Me!電話, vbNullString)
+        mobileValue = Nz(Me!携帯電話, vbNullString)
+        supportStaffValue = Nz(Me!担当支援員, vbNullString)
+        memoValue = Nz(Me!備考, vbNullString)
+        inputUserValue = Nz(Me!入力者, vbNullString)
+        checkerValue = Nz(Me!確認者, vbNullString)
+        checkDateValue = Me!確認日
+        
+        ' バインドフォームが自動保存しないように、現在の入力レコードを破棄
+        If Me.Dirty Then
+            Me.Undo
+        End If
+        
+        ' 退避した値を使って1件だけ登録
+        RegisterRecord _
+            registerDateValue, _
+            organizationValue, _
+            departmentValue, _
+            positionValue, _
+            qualificationValue, _
+            personNameValue, _
+            mailValue, _
+            mail2Value, _
+            phoneValue, _
+            mobileValue, _
+            supportStaffValue, _
+            memoValue, _
+            inputUserValue, _
+            checkerValue, _
+            checkDateValue
+        
+        MsgBox "登録しました。", vbInformation
+        
+        DoCmd.GoToRecord , , acNewRec
+        Exit Sub
+ErrorHandler:
+
+    MsgBox _
+        "登録処理中にエラーが発生しました。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical, _
+        "登録エラー"
+
+End Sub
+
+Private Sub 戻る_Click()
+
+    DoCmd.Close acForm, Me.Name
+    DoCmd.OpenForm "メニュー画面"
+
+End Sub
+
+
+ ===== 編集・削除=====
+
+Option Compare Database
+
+
+
+Private Sub クリア_Click()
+
+    Me.txt氏名 = Null
+    Me.txt組織名 = Null
+    Me.txt部署名 = Null
+    Me.txt役職 = Null
+    Me.txtメール = Null
+    Me.txt電話番号 = Null
+    Me.txt備考 = Null
+
+    Me.cmb並び順 = Null
+    Me.cmb表示順 = Null
+    Me.cmb担当支援員 = Null
+    
+    Me.FilterOn = False
+    Me.OrderByOn = False
+
+    Me.Requery
+
+End Sub
+
+Private Sub コマンド66_Click()
+
+    Dim strFilter As String
+    Dim strSort As String
+
+    '==========================
+    ' 組織名
+    '==========================
+    If Nz(Me.txt組織名, "") <> "" Then
+        strFilter = strFilter & "[組織名] Like '*" & Replace(Me.txt組織名, "'", "''") & "*' AND "
+    End If
+
+    '==========================
+    ' 部署名
+    '==========================
+    If Nz(Me.txt部署名, "") <> "" Then
+        strFilter = strFilter & "[部署名] Like '*" & Replace(Me.txt部署名, "'", "''") & "*' AND "
+    End If
+
+    '==========================
+    ' 役職
+    '==========================
+    If Nz(Me.txt役職, "") <> "" Then
+        strFilter = strFilter & "[役職] Like '*" & Replace(Me.txt役職, "'", "''") & "*' AND "
+    End If
+
+    '==========================
+    ' 氏名
+    '==========================
+    If Nz(Me.txt氏名, "") <> "" Then
+        strFilter = strFilter & "[氏名] Like '*" & Replace(Me.txt氏名, "'", "''") & "*' AND "
+    End If
+
+    '==========================
+    ' メール・メール2
+    '==========================
+    If Nz(Me.txtメール, "") <> "" Then
+
+        strFilter = strFilter & _
+        "([メール] Like '*" & Replace(Me.txtメール, "'", "''") & _
+        "*' OR [メール2] Like '*" & Replace(Me.txtメール, "'", "''") & "*') AND "
+
+    End If
+
+    '==========================
+    ' 電話・携帯電話
+    '==========================
+    If Nz(Me.txt電話番号, "") <> "" Then
+
+        strFilter = strFilter & _
+        "([電話] Like '*" & Replace(Me.txt電話番号, "'", "''") & _
+        "*' OR [携帯電話] Like '*" & Replace(Me.txt電話番号, "'", "''") & "*') AND "
+
+    End If
+    
+    
+        '==========================
+    ' 担当支援員
+    '==========================
+    If Nz(Me.cmb担当支援員, "") <> "" Then
+
+        strFilter = strFilter & _
+            "[担当支援員] Like '*" & _
+            Replace(Me.cmb担当支援員, "'", "''") & _
+            "*' AND "
+
+    End If
+    
+    '==========================
+    ' 備考
+    '==========================
+    If Nz(Me.txt備考, "") <> "" Then
+        strFilter = strFilter & "[備考] Like '*" & Replace(Me.txt備考, "'", "''") & "*' AND "
+    End If
+
+
+    '==========================
+    ' フィルタ
+    '==========================
+    If strFilter <> "" Then
+        strFilter = Left(strFilter, Len(strFilter) - 5)
+        Me.Filter = strFilter
+        Me.FilterOn = True
+    Else
+        Me.FilterOn = False
+    End If
+
+    '==========================
+    ' 並び順
+    '==========================
+    Select Case Nz(Me.cmb並び順, "")
+
+        Case "氏名"
+            strSort = "[氏名]"
+
+        Case "組織名"
+            strSort = "[組織名]"
+
+        Case "登録日"
+            strSort = "[登録日]"
+
+        Case "担当支援員"
+            strSort = "[担当支援員]"
+
+    End Select
+
+    If strSort <> "" Then
+
+        If Nz(Me.cmb表示順, "昇順") = "降順" Then
+            strSort = strSort & " DESC"
+        Else
+            strSort = strSort & " ASC"
+        End If
+
+        Me.OrderBy = strSort
+        Me.OrderByOn = True
+
+    Else
+        Me.OrderByOn = False
+    End If
+
+End Sub
+
+
+
+
+
+Private Sub 削除_Click()
+
+    On Error GoTo ErrorHandler
+
+    Dim targetID As Long
+    Dim targetName As String
+    Dim message As String
+    
+
+    If IsNull(Me.ID) Then
+        MsgBox "削除するレコードを取得できませんでした。", _
+               vbExclamation, _
+               "削除"
+        Exit Sub
+    End If
+
+    targetID = CLng(Me.ID)
+    targetName = Nz(Me.氏名, "氏名未登録")
+
+    message = _
+        "次のレコードを削除しますか？" & vbCrLf & vbCrLf & _
+        "ID：" & targetID & vbCrLf & _
+        "氏名：" & targetName & vbCrLf & vbCrLf & _
+        "削除後は元に戻せません。"
+
+    If MsgBox(message, vbYesNo + vbQuestion + vbDefaultButton2, _
+              "削除確認") <> vbYes Then
+        Exit Sub
+    End If
+
+    ' 変更理由：画面上の現在行ではなく、取得済みのIDを指定して安全に削除します。
+    CurrentDb.Execute _
+        "DELETE FROM [ダミーデータ] WHERE [ID]=" & targetID, _
+        dbFailOnError
+
+    Me.Requery
+
+    MsgBox "レコードを削除しました。", _
+           vbInformation, _
+           "削除完了"
+
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "レコードを削除できませんでした。" & vbCrLf & _
+           "エラー内容：" & Err.Description, _
+           vbCritical, _
+           "エラー"
+
+End Sub
+
+Private Sub 編集_Click()
+    On Error GoTo ErrorHandler
+    
+
+    If IsNull(Me.ID) Then
+        MsgBox "編集するレコードを取得できませんでした。", _
+               vbExclamation, _
+               "編集"
+        Exit Sub
+    End If
+
+    DoCmd.OpenForm _
+        FormName:="編集", _
+        View:=acNormal, _
+        whereCondition:="[ID]=" & CLng(Me.ID), _
+        WindowMode:=acDialog
+
+    ' 変更理由：編集フォームを閉じた後、一覧に変更内容を反映します。
+    Me.Requery
+
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "編集フォームを開けませんでした。" & vbCrLf & _
+           "エラー内容：" & Err.Description, _
+           vbCritical, _
+           "エラー"
+End Sub
+
+
+Private Sub Form_Load()
+
+    LoadSupportStaffList Me.cmb担当支援員
+
+End Sub
+
+Private Sub 戻る_Click()
+    DoCmd.Close acForm, Me.Name
+    DoCmd.OpenForm "メニュー画面"
+End Sub
+
+
+=====標準モジュール=====
+
+Option Compare Database
+Option Explicit
+
+Private Const SOURCE_TABLE As String = "ダミーデータ"
+Private Const CANDIDATE_TABLE As String = "重複候補"
+
+'============================================================
+' 重複候補の作成
+' 戻り値：
+'   0以上 = 候補件数
+'   -1    = エラー
+'============================================================
+Public Function RebuildDuplicateCandidates( _
+    ByVal inputOrganization As Variant, _
+    ByVal inputPersonName As Variant _
+) As Long
+
+    On Error GoTo ErrorHandler
+    Dim db As Object
+    
+    Dim rsSource As DAO.Recordset
+    Dim rsCandidate As DAO.Recordset
+
+    Dim organizationRate As Double
+    Dim personRate As Double
+    Dim totalRate As Double
+    Dim candidateLevel As String
+    Dim candidateCount As Long
+
+    Dim organizationText As String
+    Dim personNameText As String
+
+    organizationText = Trim$(Nz(inputOrganization, vbNullString))
+    personNameText = Trim$(Nz(inputPersonName, vbNullString))
+
+    If Len(organizationText) = 0 Then
+        Err.Raise vbObjectError + 1000, _
+                  "RebuildDuplicateCandidates", _
+                  "組織名が入力されていません。"
+    End If
+
+    If Len(personNameText) = 0 Then
+        Err.Raise vbObjectError + 1001, _
+                  "RebuildDuplicateCandidates", _
+                  "氏名が入力されていません。"
+    End If
+
+    EnsureDuplicateCandidateTable
+
+    Set db = CurrentDb
+
+    ' 変更理由：前回検索した候補を残さず、今回分だけ表示します。
+    db.Execute _
+        "DELETE FROM [" & CANDIDATE_TABLE & "]", _
+        dbFailOnError
+
+    Set rsSource = db.OpenRecordset( _
+        "SELECT [ID], [組織名], [氏名], [担当支援員] " & _
+        "FROM [" & SOURCE_TABLE & "] " & _
+        "WHERE [組織名] Is Not Null " & _
+        "AND [氏名] Is Not Null", _
+        dbOpenSnapshot _
+    )
+
+    Set rsCandidate = db.OpenRecordset( _
+        CANDIDATE_TABLE, _
+        dbOpenDynaset _
+    )
+
+    Do While Not rsSource.EOF
+
+        organizationRate = CompanySimilarityRate( _
+            organizationText, _
+            rsSource.Fields("組織名").value _
+        )
+
+        personRate = PersonSimilarityRate( _
+            personNameText, _
+            rsSource.Fields("氏名").value _
+        )
+
+        totalRate = CalculateTotalSimilarity( _
+            organizationRate, _
+            personRate _
+        )
+
+        If IsDuplicateCandidate( _
+            organizationRate, _
+            personRate, _
+            totalRate _
+        ) Then
+
+            candidateLevel = GetCandidateLevel( _
+                organizationRate, _
+                personRate, _
+                totalRate _
+            )
+
+            rsCandidate.AddNew
+            
+
+            rsCandidate.Fields("対象ID").value = _
+                CLng(rsSource.Fields("ID").value)
+
+            rsCandidate.Fields("組織名").value = _
+                Nz(rsSource.Fields("組織名").value, vbNullString)
+
+            rsCandidate.Fields("氏名").value = _
+                Nz(rsSource.Fields("氏名").value, vbNullString)
+
+            rsCandidate.Fields("担当支援員").value = _
+                Nz(rsSource.Fields("担当支援員").value, vbNullString)
+
+            rsCandidate.Fields("組織一致率").value = organizationRate
+            rsCandidate.Fields("氏名一致率").value = personRate
+            rsCandidate.Fields("総合一致率").value = totalRate
+            rsCandidate.Fields("候補区分").value = candidateLevel
+
+            rsCandidate.Update
+            candidateCount = candidateCount + 1
+        End If
+
+        rsSource.MoveNext
+    Loop
+
+    RebuildDuplicateCandidates = candidateCount
+
+CleanExit:
+    On Error Resume Next
+
+    If Not rsCandidate Is Nothing Then
+        rsCandidate.Close
+    End If
+
+    If Not rsSource Is Nothing Then
+        rsSource.Close
+    End If
+
+    Set rsCandidate = Nothing
+    Set rsSource = Nothing
+    Set db = Nothing
+
+    On Error GoTo 0
+    Exit Function
+
+ErrorHandler:
+    MsgBox _
+        "重複候補を作成できませんでした。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical, _
+        "重複チェック"
+
+    RebuildDuplicateCandidates = -1
+    Resume CleanExit
+
+End Function
+
+'============================================================
+' 候補として表示するか判定
+'
+' 候補を多めに出すため、以下のいずれかで対象にします。
+' ・氏名80%以上、会社65%以上
+' ・氏名95%以上、会社45%以上
+' ・会社95%以上、氏名65%以上
+' ・両方55%以上、総合一致率72%以上
+'============================================================
+Private Function IsDuplicateCandidate( _
+    ByVal organizationRate As Double, _
+    ByVal personRate As Double, _
+    ByVal totalRate As Double _
+) As Boolean
+
+    IsDuplicateCandidate = _
+        (personRate >= 0.8 And organizationRate >= 0.65) Or _
+        (personRate >= 0.95 And organizationRate >= 0.45) Or _
+        (organizationRate >= 0.95 And personRate >= 0.65) Or _
+        (personRate >= 0.55 And _
+         organizationRate >= 0.55 And _
+         totalRate >= 0.72)
+
+End Function
+
+'============================================================
+' 候補区分
+'============================================================
+Private Function GetCandidateLevel( _
+    ByVal organizationRate As Double, _
+    ByVal personRate As Double, _
+    ByVal totalRate As Double _
+) As String
+
+    If organizationRate >= 0.999 And personRate >= 0.999 Then
+        GetCandidateLevel = "完全一致"
+
+    ElseIf organizationRate >= 0.9 And personRate >= 0.9 Then
+        GetCandidateLevel = "高一致"
+
+    ElseIf totalRate >= 0.8 Then
+        GetCandidateLevel = "類似"
+
+    Else
+        GetCandidateLevel = "参考候補"
+    End If
+
+End Function
+
+'============================================================
+' 総合一致率
+' 氏名をやや重視します。
+'============================================================
+Private Function CalculateTotalSimilarity( _
+    ByVal organizationRate As Double, _
+    ByVal personRate As Double _
+) As Double
+
+    CalculateTotalSimilarity = _
+        (organizationRate * 0.45) + _
+        (personRate * 0.55)
+
+End Function
+
+'============================================================
+' 会社名の一致率
+'============================================================
+Public Function CompanySimilarityRate( _
+    ByVal firstValue As Variant, _
+    ByVal secondValue As Variant _
+) As Double
+
+    CompanySimilarityRate = SimilarityRateCore( _
+        NormalizeCompanyName(firstValue), _
+        NormalizeCompanyName(secondValue) _
+    )
+
+End Function
+
+'============================================================
+' 氏名の一致率
+'============================================================
+Public Function PersonSimilarityRate( _
+    ByVal firstValue As Variant, _
+    ByVal secondValue As Variant _
+) As Double
+
+    PersonSimilarityRate = SimilarityRateCore( _
+        NormalizePersonName(firstValue), _
+        NormalizePersonName(secondValue) _
+    )
+
+End Function
+
+'============================================================
+' 会社名の正規化
+'============================================================
+Private Function NormalizeCompanyName( _
+    ByVal inputValue As Variant _
+) As String
+
+    Dim result As String
+
+    result = Nz(inputValue, vbNullString)
+    result = Trim$(result)
+    result = LCase$(result)
+
+    result = Replace(result, "株式会社", vbNullString)
+    result = Replace(result, "有限会社", vbNullString)
+    result = Replace(result, "合同会社", vbNullString)
+    result = Replace(result, "合資会社", vbNullString)
+    result = Replace(result, "合名会社", vbNullString)
+
+    result = Replace(result, "（株）", vbNullString)
+    result = Replace(result, "(株)", vbNullString)
+    result = Replace(result, "㈱", vbNullString)
+
+    result = RemoveCommonSymbols(result)
+
+    NormalizeCompanyName = result
+
+End Function
+
+'============================================================
+' 氏名の正規化
+'============================================================
+Private Function NormalizePersonName( _
+    ByVal inputValue As Variant _
+) As String
+
+    Dim result As String
+
+    result = Nz(inputValue, vbNullString)
+    result = Trim$(result)
+    result = LCase$(result)
+
+    result = RemoveCommonSymbols(result)
+
+    NormalizePersonName = result
+
+End Function
+
+'============================================================
+' 比較に不要な空白・記号を除去
+'============================================================
+Private Function RemoveCommonSymbols( _
+    ByVal inputText As String _
+) As String
+
+    Dim result As String
+    Dim symbols As Variant
+    Dim symbol As Variant
+
+    result = inputText
+
+    symbols = Array( _
+        " ", _
+        "　", _
+        vbTab, _
+        "-", _
+        "－", _
+        "‐", _
+        "―", _
+        "ー", _
+        "・", _
+        "･", _
+        ".", _
+        "．", _
+        ",", _
+        "，", _
+        "、", _
+        "(", _
+        ")", _
+        "（", _
+        "）" _
+    )
+
+    For Each symbol In symbols
+        result = Replace(result, CStr(symbol), vbNullString)
+    Next symbol
+
+    RemoveCommonSymbols = result
+
+End Function
+
+'============================================================
+' 文字列一致率
+' 0～1の値を返します。
+'============================================================
+Private Function SimilarityRateCore( _
+    ByVal firstText As String, _
+    ByVal secondText As String _
+) As Double
+
+    Dim maximumLength As Long
+    Dim distance As Long
+    Dim levenshteinRate As Double
+    Dim containmentRate As Double
+
+    If Len(firstText) = 0 And Len(secondText) = 0 Then
+        SimilarityRateCore = 1
+        Exit Function
+    End If
+
+    If Len(firstText) = 0 Or Len(secondText) = 0 Then
+        SimilarityRateCore = 0
+        Exit Function
+    End If
+
+    maximumLength = Len(firstText)
+
+    If Len(secondText) > maximumLength Then
+        maximumLength = Len(secondText)
+    End If
+
+    distance = LevenshteinDistance(firstText, secondText)
+
+    levenshteinRate = _
+        1 - (CDbl(distance) / CDbl(maximumLength))
+
+    ' 変更理由：一方が他方を含む表記揺れも候補に出しやすくします。
+    If InStr(1, firstText, secondText, vbTextCompare) > 0 Or _
+       InStr(1, secondText, firstText, vbTextCompare) > 0 Then
+
+        containmentRate = _
+            CDbl(MinLong(Len(firstText), Len(secondText))) / _
+            CDbl(maximumLength)
+    Else
+        containmentRate = 0
+    End If
+
+    If containmentRate > levenshteinRate Then
+        SimilarityRateCore = containmentRate
+    Else
+        SimilarityRateCore = levenshteinRate
+    End If
+
+    If SimilarityRateCore < 0 Then
+        SimilarityRateCore = 0
+    ElseIf SimilarityRateCore > 1 Then
+        SimilarityRateCore = 1
+    End If
+
+End Function
+
+'============================================================
+' レーベンシュタイン距離
+'============================================================
+Private Function LevenshteinDistance( _
+    ByVal sourceText As String, _
+    ByVal targetText As String _
+) As Long
+
+    Dim sourceLength As Long
+    Dim targetLength As Long
+    Dim sourceIndex As Long
+    Dim targetIndex As Long
+    Dim substitutionCost As Long
+    Dim matrix() As Long
+
+    sourceLength = Len(sourceText)
+    targetLength = Len(targetText)
+
+    If sourceLength = 0 Then
+        LevenshteinDistance = targetLength
+        Exit Function
+    End If
+
+    If targetLength = 0 Then
+        LevenshteinDistance = sourceLength
+        Exit Function
+    End If
+
+    ReDim matrix(0 To sourceLength, 0 To targetLength)
+
+    For sourceIndex = 0 To sourceLength
+        matrix(sourceIndex, 0) = sourceIndex
+    Next sourceIndex
+
+    For targetIndex = 0 To targetLength
+        matrix(0, targetIndex) = targetIndex
+    Next targetIndex
+
+    For sourceIndex = 1 To sourceLength
+        For targetIndex = 1 To targetLength
+
+            If Mid$(sourceText, sourceIndex, 1) = _
+               Mid$(targetText, targetIndex, 1) Then
+                substitutionCost = 0
+            Else
+                substitutionCost = 1
+            End If
+
+            matrix(sourceIndex, targetIndex) = Min3Long( _
+                matrix(sourceIndex - 1, targetIndex) + 1, _
+                matrix(sourceIndex, targetIndex - 1) + 1, _
+                matrix(sourceIndex - 1, targetIndex - 1) + _
+                    substitutionCost _
+            )
+        Next targetIndex
+    Next sourceIndex
+
+    LevenshteinDistance = _
+        matrix(sourceLength, targetLength)
+
+End Function
+
+Private Function Min3Long( _
+    ByVal firstValue As Long, _
+    ByVal secondValue As Long, _
+    ByVal thirdValue As Long _
+) As Long
+
+    Dim result As Long
+
+    result = firstValue
+
+    If secondValue < result Then
+        result = secondValue
+    End If
+
+    If thirdValue < result Then
+        result = thirdValue
+    End If
+
+    Min3Long = result
+
+End Function
+
+Private Function MinLong( _
+    ByVal firstValue As Long, _
+    ByVal secondValue As Long _
+) As Long
+
+    If firstValue <= secondValue Then
+        MinLong = firstValue
+    Else
+        MinLong = secondValue
+    End If
+
+End Function
+
+'============================================================
+' 既存レコードへ担当支援員を追加
+'
+' 例：
+' 既存「楯」
+' 追加「伊藤」
+' 結果「楯,伊藤」
+'
+' 既に同じ名前がある場合は追加しません。
+'============================================================
+Public Function MergeSupportStaff( _
+    ByVal targetID As Long, _
+    ByVal newSupportStaff As Variant _
+) As Boolean
+
+    On Error GoTo ErrorHandler
+
+    Dim db As Object
+    Dim rs As Object
+
+    Dim currentValue As String
+    Dim newValue As String
+    Dim mergedValue As String
+
+    If targetID <= 0 Then
+        Err.Raise vbObjectError + 1100, _
+                  "MergeSupportStaff", _
+                  "対象IDが不正です。"
+    End If
+
+    newValue = NormalizeSupportStaffName(newSupportStaff)
+
+    If Len(newValue) = 0 Then
+        Err.Raise vbObjectError + 1101, _
+                  "MergeSupportStaff", _
+                  "追加する担当支援員が入力されていません。"
+    End If
+
+    Set db = CurrentDb
+
+    Set rs = db.OpenRecordset( _
+        "SELECT [ID], [担当支援員] " & _
+        "FROM [" & SOURCE_TABLE & "] " & _
+        "WHERE [ID]=" & CStr(targetID), _
+        dbOpenDynaset _
+    )
+
+    If rs.EOF Then
+        Err.Raise vbObjectError + 1102, _
+                  "MergeSupportStaff", _
+                  "対象レコードが見つかりません。"
+    End If
+
+    currentValue = Nz( _
+        rs.Fields("担当支援員").value, _
+        vbNullString _
+    )
+
+    mergedValue = AppendUniqueSupportStaff( _
+        currentValue, _
+        newValue _
+    )
+  
+
+    If StrComp( _
+        currentValue, _
+        mergedValue, _
+        vbBinaryCompare _
+    ) <> 0 Then
+
+        rs.Edit
+        rs.Fields("担当支援員").value = mergedValue
+        rs.Update
+    End If
+
+    MergeSupportStaff = True
+
+CleanExit:
+    On Error Resume Next
+
+    If Not rs Is Nothing Then
+        rs.Close
+    End If
+
+    Set rs = Nothing
+    Set db = Nothing
+
+    On Error GoTo 0
+    Exit Function
+
+ErrorHandler:
+    MsgBox _
+        "担当支援員を追加できませんでした。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical, _
+        "担当支援員追加"
+
+    MergeSupportStaff = False
+    Resume CleanExit
+
+End Function
+
+'============================================================
+' 担当支援員を重複させず追加
+'============================================================
+Public Function AppendUniqueSupportStaff( _
+    ByVal currentSupportStaff As String, _
+    ByVal newSupportStaff As String _
+) As String
+
+    Dim normalizedCurrent As String
+    Dim staffItems() As String
+    Dim item As Variant
+
+    normalizedCurrent = NormalizeSupportStaffList( _
+        currentSupportStaff _
+    )
+
+    If Len(normalizedCurrent) = 0 Then
+        AppendUniqueSupportStaff = newSupportStaff
+        Exit Function
+    End If
+
+    staffItems = Split(normalizedCurrent, ",")
+
+    For Each item In staffItems
+        If StrComp( _
+            Trim$(CStr(item)), _
+            newSupportStaff, _
+            vbTextCompare _
+        ) = 0 Then
+
+            AppendUniqueSupportStaff = normalizedCurrent
+            Exit Function
+        End If
+    Next item
+
+    AppendUniqueSupportStaff = _
+        normalizedCurrent & "," & newSupportStaff
+
+End Function
+
+'============================================================
+' 担当支援員欄の区切り文字を半角カンマに統一
+'============================================================
+Private Function NormalizeSupportStaffList( _
+    ByVal inputText As String _
+) As String
+
+    Dim result As String
+
+    result = Trim$(inputText)
+    result = Replace(result, "、", ",")
+    result = Replace(result, "，", ",")
+    result = Replace(result, "・", ",")
+    result = Replace(result, "／", ",")
+    result = Replace(result, "/", ",")
+    result = Replace(result, " ,", ",")
+    result = Replace(result, ", ", ",")
+
+    Do While InStr(result, ",,") > 0
+        result = Replace(result, ",,", ",")
+    Loop
+
+    If Left$(result, 1) = "," Then
+        result = Mid$(result, 2)
+    End If
+
+    If Right$(result, 1) = "," Then
+        result = Left$(result, Len(result) - 1)
+    End If
+
+    NormalizeSupportStaffList = result
+
+End Function
+
+Private Function NormalizeSupportStaffName( _
+    ByVal inputValue As Variant _
+) As String
+
+    Dim result As String
+
+    result = Trim$(Nz(inputValue, vbNullString))
+    result = Replace(result, ",", vbNullString)
+    result = Replace(result, "、", vbNullString)
+    result = Replace(result, "，", vbNullString)
+
+    NormalizeSupportStaffName = result
+
+End Function
+
+'============================================================
+' 重複候補テーブルがなければ自動作成
+'============================================================
+Private Sub EnsureDuplicateCandidateTable()
+
+    On Error GoTo ErrorHandler
+
+    Dim db As Object
+
+    Set db = CurrentDb
+
+    If TableExists(CANDIDATE_TABLE) Then
+        Exit Sub
+    End If
+
+    db.Execute _
+        "CREATE TABLE [" & CANDIDATE_TABLE & "] (" & _
+        "[候補ID] COUNTER CONSTRAINT [PK_重複候補] PRIMARY KEY, " & _
+        "[対象ID] LONG NOT NULL, " & _
+        "[組織名] TEXT(255), " & _
+        "[氏名] TEXT(100), " & _
+        "[担当支援員] TEXT(255), " & _
+        "[組織一致率] DOUBLE, " & _
+        "[氏名一致率] DOUBLE, " & _
+        "[総合一致率] DOUBLE, " & _
+        "[候補区分] TEXT(20)" & _
+        ")", _
+        dbFailOnError
+
+CleanExit:
+    Set db = Nothing
+    Exit Sub
+
+ErrorHandler:
+    Set db = Nothing
+
+    Err.Raise Err.Number, _
+              "EnsureDuplicateCandidateTable", _
+              Err.Description
+
+End Sub
+
+'============================================================
+' テーブル存在確認
+'============================================================
+Private Function TableExists( _
+    ByVal tableName As String _
+) As Boolean
+
+    Dim tableDefinition As DAO.TableDef
+
+    TableExists = False
+
+    For Each tableDefinition In CurrentDb.TableDefs
+        If StrComp( _
+            tableDefinition.Name, _
+            tableName, _
+            vbTextCompare _
+        ) = 0 Then
+
+            TableExists = True
+            Exit Function
+        End If
+    Next tableDefinition
+
+End Function
+
+Public Sub ImportNextRecord()
+
+    On Error GoTo ErrorHandler
+
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+
+    Dim duplicateCount As Long
+    Dim importID As Long
+    Dim sql As String
+
+    Set db = CurrentDb
+    
+
+ProcessNextRecord:
+
+    Set rs = db.OpenRecordset( _
+        "SELECT TOP 1 * FROM [一時テーブル] ORDER BY [ID]", _
+        dbOpenDynaset)
+
+    If rs.EOF Then
+        rs.Close
+        Set rs = Nothing
+
+        'On Error Resume Next
+        TempVars.Remove "ImportMode"
+        On Error GoTo ErrorHandler
+
+        MsgBox "インポートが完了しました。", vbInformation
+        GoTo CleanExit
+    End If
+
+    importID = CLng(rs.Fields("ID").value)
+
+    db.Execute _
+        "DELETE FROM [重複候補]", _
+        dbFailOnError
+
+    ' 変更理由：完全一致なら候補フォームを表示せず、その行をスキップします。
+    If IsExactDuplicate( _
+            rs.Fields("組織名").value, _
+            rs.Fields("氏名").value, _
+            rs.Fields("担当支援員").value) Then
+
+        rs.Close
+        Set rs = Nothing
+
+        db.Execute _
+            "DELETE FROM [一時テーブル] " & _
+            "WHERE [ID]=" & importID, _
+            dbFailOnError
+
+        GoTo ProcessNextRecord
+    End If
+
+    duplicateCount = RebuildDuplicateCandidates( _
+                        rs.Fields("組織名").value, _
+                        rs.Fields("氏名").value)
+
+    If duplicateCount = -1 Then
+        rs.Close
+        Set rs = Nothing
+        GoTo CleanExit
+    End If
+    
+    
+
+     If duplicateCount > 0 Then
+    
+        TempVars("ImportRecordID") = importID
+    
+        TempVars("NewRegisterDate") = Nz(rs!登録日, Date)
+        TempVars("NewOrganization") = CStr(Nz(rs!組織名, vbNullString))
+        TempVars("NewDepartment") = CStr(Nz(rs!部署名, vbNullString))
+        TempVars("NewPosition") = CStr(Nz(rs!役職, vbNullString))
+        TempVars("NewQualification") = CStr(Nz(rs!資格, vbNullString))
+        TempVars("NewPersonName") = CStr(Nz(rs!氏名, vbNullString))
+        TempVars("NewMail") = CStr(Nz(rs!メール, vbNullString))
+        TempVars("NewMail2") = CStr(Nz(rs!メール2, vbNullString))
+        TempVars("NewPhone") = CStr(Nz(rs!電話, vbNullString))
+        TempVars("NewMobile") = CStr(Nz(rs!携帯電話, vbNullString))
+        TempVars("NewSupportStaff") = CStr(Nz(rs!担当支援員, vbNullString))
+        TempVars("NewMemo") = CStr(Nz(rs!備考, vbNullString))
+        TempVars("NewInputUser") = CStr(Nz(rs!入力者, vbNullString))
+        TempVars("NewChecker") = CStr(Nz(rs!確認者, vbNullString))
+        TempVars("NewCheckDate") = Nz(rs!確認日, "")
+    
+        rs.Close
+        Set rs = Nothing
+    
+        DoCmd.OpenForm "重複候補フォーム"
+        GoTo CleanExit
+    
+    End If
+
+        RegisterRecord _
+        Nz(rs.Fields("登録日").value, Date), _
+        CStr(Nz(rs.Fields("組織名").value, vbNullString)), _
+        CStr(Nz(rs.Fields("部署名").value, vbNullString)), _
+        CStr(Nz(rs.Fields("役職").value, vbNullString)), _
+        CStr(Nz(rs.Fields("資格").value, vbNullString)), _
+        CStr(Nz(rs.Fields("氏名").value, vbNullString)), _
+        CStr(Nz(rs.Fields("メール").value, vbNullString)), _
+        CStr(Nz(rs.Fields("メール２").value, vbNullString)), _
+        CStr(Nz(rs.Fields("電話").value, vbNullString)), _
+        CStr(Nz(rs.Fields("携帯電話").value, vbNullString)), _
+        CStr(Nz(rs.Fields("担当支援員").value, vbNullString)), _
+        CStr(Nz(rs.Fields("備考").value, vbNullString)), _
+        CStr(Nz(rs.Fields("入力者").value, vbNullString)), _
+        CStr(Nz(rs.Fields("確認者").value, vbNullString)), _
+        rs.Fields("確認日").value
+
+    rs.Close
+    Set rs = Nothing
+
+    db.Execute _
+        "DELETE FROM [一時テーブル] " & _
+        "WHERE [ID]=" & importID, _
+        dbFailOnError
+
+    GoTo ProcessNextRecord
+
+CleanExit:
+    On Error Resume Next
+
+    If Not rs Is Nothing Then
+        rs.Close
+    End If
+
+    Set rs = Nothing
+    Set db = Nothing
+
+    On Error GoTo 0
+    Exit Sub
+
+ErrorHandler:
+    MsgBox _
+        "インポート処理中にエラーが発生しました。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical, _
+        "インポートエラー"
+
+    Resume CleanExit
+
+End Sub
+    
+
+
+Public Function IsExactDuplicate( _
+    ByVal inputOrganization As Variant, _
+    ByVal inputPersonName As Variant, _
+    Optional ByVal inputSupportStaff As Variant = Null _
+) As Boolean
+
+    On Error GoTo ErrorHandler
+
+    Dim organizationText As String
+    Dim personNameText As String
+    Dim supportStaffText As String
+
+    Dim whereCondition As String
+
+    ' 変更理由：既存担当支援員取得用
+    Dim existingSupportStaff As String
+    Dim inputArray() As String
+    Dim i As Long
+
+    ' 変更理由：該当レコードを全件確認するため
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+    Dim isIncluded As Boolean
+
+    organizationText = Replace( _
+        Trim$(Nz(inputOrganization, vbNullString)), _
+        "'", _
+        "''")
+
+    personNameText = Replace( _
+        Trim$(Nz(inputPersonName, vbNullString)), _
+        "'", _
+        "''")
+
+    supportStaffText = Replace( _
+        Trim$(Nz(inputSupportStaff, vbNullString)), _
+        "'", _
+        "''")
+
+    whereCondition = _
+        "[組織名]='" & organizationText & "'" & _
+        " AND [氏名]='" & personNameText & "'"
+
+    If DCount("*", SOURCE_TABLE, whereCondition) = 0 Then
+        IsExactDuplicate = False
+        Exit Function
+    End If
+
+    Set db = CurrentDb
+
+    Set rs = db.OpenRecordset( _
+        "SELECT [担当支援員] " & _
+        "FROM [" & SOURCE_TABLE & "] " & _
+        "WHERE " & whereCondition, _
+        dbOpenSnapshot)
+
+    If Len(supportStaffText) = 0 Then
+        IsExactDuplicate = True
+        GoTo CleanExit
+    End If
+
+    inputArray = Split(supportStaffText, ",")
+
+    Do Until rs.EOF
+
+        existingSupportStaff = Nz(rs!担当支援員, "")
+
+        isIncluded = True
+
+        For i = LBound(inputArray) To UBound(inputArray)
+
+            If InStr( _
+                    1, _
+                    "," & existingSupportStaff & ",", _
+                    "," & Trim$(inputArray(i)) & ",", _
+                    vbTextCompare) = 0 Then
+
+                isIncluded = False
+                Exit For
+
+            End If
+
+        Next i
+
+        If isIncluded Then
+            IsExactDuplicate = True
+            GoTo CleanExit
+        End If
+
+        rs.MoveNext
+
+    Loop
+
+    IsExactDuplicate = False
+
+CleanExit:
+
+    If Not rs Is Nothing Then rs.Close
+
+    Set rs = Nothing
+    Set db = Nothing
+
+    Exit Function
+
+ErrorHandler:
+
+    If Not rs Is Nothing Then rs.Close
+
+    Set rs = Nothing
+    Set db = Nothing
+
+    MsgBox _
+        "完全一致チェックでエラーが発生しました。" & vbCrLf & _
+        "エラー番号：" & Err.Number & vbCrLf & _
+        "内容：" & Err.Description, _
+        vbCritical
+
+    IsExactDuplicate = False
+
+End Function
+
+Public Sub RegisterRecord( _
+    ByVal 登録日 As Variant, _
+    ByVal 組織名 As String, _
+    ByVal 部署名 As String, _
+    ByVal 役職 As String, _
+    ByVal 資格 As String, _
+    ByVal 氏名 As String, _
+    ByVal メール As String, _
+    ByVal メール2 As String, _
+    ByVal 電話 As String, _
+    ByVal 携帯電話 As String, _
+    ByVal 担当支援員 As String, _
+    ByVal 備考 As String, _
+    ByVal 入力者 As String, _
+    ByVal 確認者 As String, _
+    ByVal 確認日 As Variant)
+
+    Dim db As DAO.Database
+    Dim sql As String
+
+    Set db = CurrentDb
+
+    sql = _
+        "INSERT INTO [ダミーデータ] (" & _
+        "[登録日],[組織名],[部署名],[役職],[資格]," & _
+        "[氏名],[メール],[メール２],[電話],[携帯電話]," & _
+        "[担当支援員],[備考],[入力者],[確認者],[確認日]) "
+
+    sql = sql & _
+        "VALUES(" & _
+        "#" & Format$(Nz(登録日, Date), "yyyy\/mm\/dd") & "#," & _
+        "'" & Replace(Nz(組織名, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(部署名, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(役職, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(資格, vbNullString), "'", "''") & "',"
+
+    sql = sql & _
+        "'" & Replace(Nz(氏名, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(メール, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(メール2, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(電話, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(携帯電話, vbNullString), "'", "''") & "',"
+
+    sql = sql & _
+        "'" & Replace(Nz(担当支援員, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(備考, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(入力者, vbNullString), "'", "''") & "'," & _
+        "'" & Replace(Nz(確認者, vbNullString), "'", "''") & "',"
+
+    If Nz(確認日, "") = "" Then
+        sql = sql & "Null)"
+    Else
+        sql = sql & _
+            "#" & Format$(CDate(確認日), "yyyy\/mm\/dd") & "#)"
+    End If
+    
+
+    db.Execute sql, dbFailOnError
+
+    Set db = Nothing
+
+End Sub
+
+Public Sub ClearNewRecordTempVars()
+
+    On Error Resume Next
+
+    TempVars.Remove "NewRegisterDate"
+    TempVars.Remove "NewOrganization"
+    TempVars.Remove "NewDepartment"
+    TempVars.Remove "NewPosition"
+    TempVars.Remove "NewQualification"
+    TempVars.Remove "NewPersonName"
+    TempVars.Remove "NewMail"
+    TempVars.Remove "NewMail2"
+    TempVars.Remove "NewPhone"
+    TempVars.Remove "NewMobile"
+    TempVars.Remove "NewSupportStaff"
+    TempVars.Remove "NewMemo"
+    TempVars.Remove "NewInputUser"
+    TempVars.Remove "NewChecker"
+    TempVars.Remove "NewCheckDate"
+
+    On Error GoTo 0
+
+End Sub
+
+Public Sub LoadSupportStaffList(cmb As ComboBox)
+
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+
+    Dim dict As Object
+
+    Dim arr() As String
+    Dim i As Long
+    Dim value As Variant
+
+    Set db = CurrentDb
+
+    Set rs = db.OpenRecordset( _
+        "SELECT [担当支援員] FROM [ダミーデータ] " & _
+        "WHERE [担当支援員] Is Not Null " & _
+        "AND [担当支援員]<>''", _
+        dbOpenSnapshot)
+
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    Do While Not rs.EOF
+
+        arr = Split(CStr(rs!担当支援員), ",")
+
+        For i = LBound(arr) To UBound(arr)
+
+            value = Trim(arr(i))
+
+            If value <> "" Then
+
+                If Not dict.Exists(value) Then
+                    dict.Add value, value
+                End If
+
+            End If
+
+        Next i
+
+        rs.MoveNext
+
+    Loop
+
+    rs.Close
+    Set rs = Nothing
+    Set db = Nothing
+
+    cmb.RowSourceType = "値リスト"
+    cmb.RowSource = ""
+
+    cmb.AddItem ""
+
+    For Each value In dict.Keys
+        cmb.AddItem value
+    Next value
+
+    Set dict = Nothing
+
+End Sub
+
+
+
+
