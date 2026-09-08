@@ -12,7 +12,7 @@
 
 実際の画面操作と、主な機能の流れを動画で紹介しています。
 
-[YouTubeでデモ動画を見る](https://www.youtube.com/watch?v=Hz1WpOQIbUw)
+[YouTubeでデモ動画を見る](https://youtu.be/xjCUb2eYHck)
 
 ### 支援員との要件確認・調整
 
